@@ -76,8 +76,19 @@
             <ul class="divide-y divide-gray-200">
                 {% for enrollment in enrollments %}
                 <li class="py-3 flex justify-between items-center">
-                    <span class="text-gray-800">{{ enrollment.student.name }}</span>
-                    <span class="text-xs text-gray-400">{{ enrollment.enrolled_at|date:"Y-m-d H:i" }}</span>
+                    <div>
+                        <span class="text-gray-800">{{ enrollment.student.name }}</span>
+                        <span class="text-xs text-gray-400">{{ enrollment.enrolled_at|date:"Y-m-d H:i" }}</span>
+                    </div>
+                    <form method="post" action="{% url 'courses:course-detail' course.pk %}">
+                        {% csrf_token %}
+                        <input type="hidden" name="action" value="withdraw">
+                        <input type="hidden" name="student_id" value="{{ enrollment.student_id }}">
+                        <button type="submit"
+                            class="text-sm text-red-600 hover:text-red-800 hover:underline">
+                            取消報名
+                        </button>
+                    </form>
                 </li>
                 {% endfor %}
             </ul>
