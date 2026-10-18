@@ -1,4 +1,4 @@
-from django.shortcuts import render, get_object_or_404
+from django.shortcuts import render, get_object_or_404, redirect
 from django.contrib import messages
 from django.db.models import Q
 from rest_framework import generics, status, permissions
@@ -9,6 +9,14 @@ from .serializers import (
     TeacherSerializer, StudentSerializer, CourseSerializer,
     CourseCreateSerializer, EnrollmentSerializer, EnrollmentCreateSerializer
 )
+
+
+def _withdraw_enrollment(student_id, course_id):
+    deleted, _ = Enrollment.objects.filter(
+        student_id=student_id, course_id=course_id
+    ).delete()
+    return deleted
+
 
 # -----------------------------
 # 前端 Template Views
@@ -61,25 +69,34 @@ def course_list(request):
 # 課程詳情
 def course_detail(request, pk):
     course = get_object_or_404(Course, pk=pk)
-    students = Student.objects.all()
+    students = Student.objects.all().order_by("name")
     enrollments = Enrollment.objects.filter(course=course).select_related('student')
 
     if request.method == 'POST':
         student_id = request.POST.get('student_id')
-        try:
-            student = Student.objects.get(id=student_id)
-            enrollment, created = Enrollment.objects.get_or_create(
-                student=student,
-                course=course
-            )
-            if created:
-                messages.success(request, f'{student.name} 成功報名 {course.title}')
+        if not student_id or not student_id.isdigit():
+            messages.error(request, '請選擇有效的學生')
+        elif request.POST.get('action') == 'withdraw':
+            deleted = _withdraw_enrollment(student_id, course.pk)
+            if deleted:
+                messages.success(request, '已成功取消報名')
             else:
-                messages.warning(request, f'{student.name} 已經報名過 {course.title}')
-        except Student.DoesNotExist:
-            messages.error(request, '學生不存在')
-        except Exception as e:
-            messages.error(request, f'報名失敗：{str(e)}')
+                messages.warning(request, '此學生尚未報名這門課程')
+        else:
+            student = Student.objects.filter(pk=student_id).first()
+            if student is None:
+                messages.error(request, '學生不存在')
+            else:
+                _, created = Enrollment.objects.get_or_create(
+                    student=student,
+                    course=course
+                )
+                if created:
+                    messages.success(request, f'{student.name} 成功報名 {course.title}')
+                else:
+                    messages.warning(request, f'{student.name} 已經報名過 {course.title}')
+        return redirect('courses:course-detail', pk=course.pk)
+
     return render(request, 'courses/course_detail.html', {
         'course': course,
         'students': students,
@@ -114,12 +131,32 @@ class TeacherListCreateView(generics.ListCreateAPIView):
         return [permissions.AllowAny()]
 
 
+class TeacherDetailView(generics.RetrieveUpdateDestroyAPIView):
+    queryset = Teacher.objects.all()
+    serializer_class = TeacherSerializer
+
+    def get_permissions(self):
+        if self.request.method in permissions.SAFE_METHODS:
+            return [permissions.AllowAny()]
+        return [permissions.IsAdminUser()]
+
+
 class StudentListCreateView(generics.ListCreateAPIView):
     """
     學生列表：GET / POST 皆公開（依 README 規格，學生可自行報名系統時自行註冊）
     """
     queryset = Student.objects.all()
     serializer_class = StudentSerializer
+
+
+class StudentDetailView(generics.RetrieveUpdateDestroyAPIView):
+    queryset = Student.objects.all()
+    serializer_class = StudentSerializer
+
+    def get_permissions(self):
+        if self.request.method in permissions.SAFE_METHODS:
+            return [permissions.AllowAny()]
+        return [permissions.IsAdminUser()]
 
 
 class CourseListView(generics.ListAPIView):
@@ -181,3 +218,14 @@ def enroll_student(request):
             'course': enrollment.course.title
         }, status=status.HTTP_201_CREATED)
     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+@api_view(['DELETE'])
+def withdraw_student(request, student_id, course_id):
+    deleted = _withdraw_enrollment(student_id, course_id)
+    if not deleted:
+        return Response(
+            {'detail': '找不到此學生的課程報名紀錄'},
+            status=status.HTTP_404_NOT_FOUND,
+        )
+    return Response(status=status.HTTP_204_NO_CONTENT)

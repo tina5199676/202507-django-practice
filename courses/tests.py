@@ -104,6 +104,37 @@ class TeacherAPITests(APITestCase):
         response = self.client.post(url, payload, format="json")
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
+    def test_update_teacher_requires_admin(self):
+        response = self.client.patch(
+            reverse("teacher-detail", kwargs={"pk": self.teacher.pk}),
+            {"name": "新名字"},
+            format="json",
+        )
+        self.assertIn(
+            response.status_code,
+            [status.HTTP_401_UNAUTHORIZED, status.HTTP_403_FORBIDDEN],
+        )
+        self.teacher.refresh_from_db()
+        self.assertEqual(self.teacher.name, "王老師")
+
+    def test_admin_can_update_and_delete_teacher(self):
+        admin = User.objects.create_user(
+            username="teacher-admin", password="test-password", is_staff=True
+        )
+        self.client.force_authenticate(user=admin)
+        detail_url = reverse("teacher-detail", kwargs={"pk": self.teacher.pk})
+
+        response = self.client.patch(
+            detail_url, {"name": "王老師（更新）"}, format="json"
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.teacher.refresh_from_db()
+        self.assertEqual(self.teacher.name, "王老師（更新）")
+
+        response = self.client.delete(detail_url)
+        self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
+        self.assertFalse(Teacher.objects.filter(pk=self.teacher.pk).exists())
+
 
 class CourseAPITests(APITestCase):
     def setUp(self):
@@ -208,6 +239,78 @@ class EnrollmentAPITests(APITestCase):
         payload = {"student_id": 9999, "course_id": self.course.id}
         response = self.client.post(url, payload, format="json")
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_student_can_withdraw_from_course(self):
+        enrollment = Enrollment.objects.create(
+            student=self.student, course=self.course
+        )
+        url = reverse(
+            "withdraw-student",
+            kwargs={"student_id": self.student.pk, "course_id": self.course.pk},
+        )
+        response = self.client.delete(url)
+        self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
+        self.assertFalse(Enrollment.objects.filter(pk=enrollment.pk).exists())
+
+    def test_withdraw_missing_enrollment_returns_404(self):
+        url = reverse(
+            "withdraw-student",
+            kwargs={"student_id": self.student.pk, "course_id": self.course.pk},
+        )
+        response = self.client.delete(url)
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_course_detail_allows_student_to_withdraw(self):
+        Enrollment.objects.create(student=self.student, course=self.course)
+        url = reverse("courses:course-detail", kwargs={"pk": self.course.pk})
+        response = self.client.post(
+            url,
+            {"action": "withdraw", "student_id": self.student.pk},
+        )
+        self.assertRedirects(response, url)
+        self.assertFalse(
+            Enrollment.objects.filter(
+                student=self.student, course=self.course
+            ).exists()
+        )
+
+
+class StudentAPITests(APITestCase):
+    def setUp(self):
+        self.student = Student.objects.create(
+            name="小明", email="student_ming@example.com", level="beginner"
+        )
+
+    def test_update_student_requires_admin(self):
+        response = self.client.patch(
+            reverse("student-detail", kwargs={"pk": self.student.pk}),
+            {"name": "新名字"},
+            format="json",
+        )
+        self.assertIn(
+            response.status_code,
+            [status.HTTP_401_UNAUTHORIZED, status.HTTP_403_FORBIDDEN],
+        )
+        self.student.refresh_from_db()
+        self.assertEqual(self.student.name, "小明")
+
+    def test_admin_can_update_and_delete_student(self):
+        admin = User.objects.create_user(
+            username="student-admin", password="test-password", is_staff=True
+        )
+        self.client.force_authenticate(user=admin)
+        detail_url = reverse("student-detail", kwargs={"pk": self.student.pk})
+
+        response = self.client.patch(
+            detail_url, {"name": "小明（更新）"}, format="json"
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.student.refresh_from_db()
+        self.assertEqual(self.student.name, "小明（更新）")
+
+        response = self.client.delete(detail_url)
+        self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
+        self.assertFalse(Student.objects.filter(pk=self.student.pk).exists())
 
 
 class CourseSearchAPITests(APITestCase):

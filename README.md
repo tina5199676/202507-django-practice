@@ -18,7 +18,8 @@
 - 多對多關聯：課程可對應多位老師，老師可教授多門課程
 - 學生報名限制：同一課程僅能報名一次（資料庫層級限制）
 - 課程搜尋與篩選：依關鍵字（課程名稱／說明／老師姓名）或依老師篩選課程
-- 權限控管：新增老師、新增／刪除課程僅限管理員操作
+- 權限控管：老師與學生資料的編輯／刪除，以及課程新增／刪除僅限管理員操作
+- 報名管理：學生可在課程詳情頁取消報名，也可透過 API 退選
 - 前後端整合：REST API（含分頁）+ Django Templates
 - 前端美化：Tailwind CSS 卡片式 UI，含完整空狀態設計
 - 管理方便：Django Admin 完整管理資料
@@ -140,19 +141,22 @@ flowchart TD
 
 ## API 設計（RESTful）
 
-| 功能                      | 方法   | 路徑                      | 說明                                               | 需要驗證     |
-| ------------------------- | ------ | ------------------------- | -------------------------------------------------- | ------------ |
-| 課程列表（支援搜尋/篩選） | GET    | /api/courses/             | 列出課程，支援 `?search=關鍵字`、`?teacher=老師id` | 否           |
-| 單一課程                  | GET    | /api/courses/{id}/        | 課程詳細資訊                                       | 否           |
-| 新增課程                  | POST   | /api/courses/create/      | 新增課程（提供老師 ID）                            | 是（管理員） |
-| 刪除課程                  | DELETE | /api/courses/{id}/delete/ | 刪除課程                                           | 是（管理員） |
-| 老師列表                  | GET    | /api/teachers/            | 列出老師                                           | 否           |
-| 新增老師                  | POST   | /api/teachers/            | 新增老師                                           | 是（管理員） |
-| 學生列表                  | GET    | /api/students/            | 列出學生                                           | 否           |
-| 新增學生                  | POST   | /api/students/            | 新增學生                                           | 否           |
-| 學生報名課程              | POST   | /api/enrollments/         | 報名課程                                           | 否           |
+| 功能                      | 方法              | 路徑                                           | 說明                                               | 需要驗證     |
+| ------------------------- | ----------------- | ---------------------------------------------- | -------------------------------------------------- | ------------ |
+| 課程列表（支援搜尋/篩選） | GET               | /api/courses/                                  | 列出課程，支援 `?search=關鍵字`、`?teacher=老師id` | 否           |
+| 單一課程                  | GET               | /api/courses/{id}/                             | 課程詳細資訊                                       | 否           |
+| 新增課程                  | POST              | /api/courses/create/                           | 新增課程（提供老師 ID）                            | 是（管理員） |
+| 刪除課程                  | DELETE            | /api/courses/{id}/delete/                      | 刪除課程                                           | 是（管理員） |
+| 老師列表                  | GET               | /api/teachers/                                 | 列出老師                                           | 否           |
+| 新增老師                  | POST              | /api/teachers/                                 | 新增老師                                           | 是（管理員） |
+| 編輯／刪除老師            | PATCH／PUT／DELETE | /api/teachers/{id}/                            | 管理老師資料                                       | 是（管理員） |
+| 學生列表                  | GET               | /api/students/                                 | 列出學生                                           | 否           |
+| 新增學生                  | POST              | /api/students/                                 | 新增學生                                           | 否           |
+| 編輯／刪除學生            | PATCH／PUT／DELETE | /api/students/{id}/                            | 管理學生資料                                       | 是（管理員） |
+| 學生報名課程              | POST              | /api/enrollments/                              | 報名課程                                           | 否           |
+| 學生取消報名              | DELETE            | /api/enrollments/{student_id}/{course_id}/     | 取消指定學生的課程報名                             | 否           |
 
-> 管理員身分判斷為 Django 使用者的 `is_staff=True`（`createsuperuser` 建立的帳號預設具備）。API 驗證方式支援 Session（瀏覽器登入 Admin 後即可直接操作 API）與 HTTP Basic Auth（方便用 Postman/curl 測試）。
+> 管理員身分判斷為 Django 使用者的 `is_staff=True`（`createsuperuser` 建立的帳號預設具備）。API 驗證方式支援 Session（瀏覽器登入 Admin 後即可直接操作 API）與 HTTP Basic Auth（方便用 Postman/curl 測試）。退選端點沿用目前沒有學生登入機制的設計，只依 `student_id` 和 `course_id` 定位報名紀錄；它不會驗證呼叫者是否為該學生。
 
 ## 課程搜尋 / 篩選
 
@@ -272,6 +276,18 @@ GET /api/courses/?search=英文&teacher=1
 }
 ```
 
+### 5. 取消課程報名
+
+**Request** `DELETE /api/enrollments/2/1/`（學生 ID 為 `2`、課程 ID 為 `1`）
+
+**Response** `204 No Content`
+
+課程詳情頁的「取消報名」按鈕會提供相同功能。若沒有該筆報名紀錄，API 回傳 `404 Not Found`。
+
+### 6. 編輯／刪除老師與學生
+
+管理員可使用 `PATCH` 或 `PUT /api/teachers/{id}/`、`PATCH` 或 `PUT /api/students/{id}/` 更新資料，並以 `DELETE` 刪除。老師與學生的單筆 `GET` 查詢仍公開；更新與刪除均須管理員身分。刪除學生會依資料模型的 cascade 規則一併刪除其報名紀錄。
+
 ## 專案架構
 
 ```
@@ -314,7 +330,7 @@ GET /api/courses/?search=英文&teacher=1
 
 ```bash
 git clone https://github.com/tina5199676/202507-django-practice.git
-cd 202507-online-course
+cd 202507-django-practice
 ```
 
 ### 2. 建立虛擬環境並安裝依賴
@@ -366,9 +382,32 @@ python manage.py createsuperuser
 python manage.py runserver
 ```
 
+## 正式環境部署設定
+
+正式環境以 PostgreSQL 作為資料庫，並由 WhiteNoise 提供 Django 靜態檔案。將以下環境變數設定在部署平台（不要把正式憑證提交到 Git）：
+
+```env
+DEBUG=False
+SECRET_KEY=<使用 Django get_random_secret_key 產生的隨機值>
+ALLOWED_HOSTS=course.example.com
+CSRF_TRUSTED_ORIGINS=https://course.example.com
+DATABASE_URL=postgresql://<user>:<password>@<host>:5432/<database>
+CORS_ALLOW_ALL_ORIGINS=False
+CORS_ALLOWED_ORIGINS=https://course.example.com
+```
+
+`DATABASE_URL` 設定後會使用 PostgreSQL，正式環境連線會要求 SSL；未設定時仍使用本機 SQLite。資料庫密碼若含特殊字元，需先做 URL encoding。部署時執行：
+
+```bash
+python manage.py migrate
+python manage.py collectstatic --noinput
+```
+
+`collectstatic` 會將檔案收集至 `staticfiles/`；WhiteNoise 會以壓縮及雜湊檔名提供靜態檔。部署平台需將 `project.wsgi:application` 設為 WSGI 應用入口，並在 HTTPS 反向代理上正確轉送 `X-Forwarded-Proto`。正式環境請使用平台的環境變數／秘密管理功能，不要以 `.env.example` 中的開發值上線。
+
 ## 測試
 
-執行單元測試，涵蓋 model 限制（重複報名）、API 端點、權限控管、搜尋/篩選功能：
+執行單元測試，涵蓋 model 限制（重複報名）、API 端點、權限控管、搜尋/篩選及取消報名：
 
 ```bash
 python manage.py test
@@ -391,7 +430,8 @@ python manage.py test
 3. 在課程詳情頁報名學生
 4. 已報名學生不可重複報名同一課程
 5. 老師與學生資料可透過 Admin 管理
-6. 管理員可透過 API 新增／刪除課程
+6. 管理員可透過 API 新增／刪除課程，以及編輯／刪除老師和學生資料
+7. 學生可在課程詳情頁取消報名
 
 ## 未來優化
 
@@ -399,9 +439,9 @@ python manage.py test
 - [x] API 權限控管（新增老師、新增/刪除課程限管理員）
 - [x] 前端搜尋與篩選課程功能
 - [x] 空狀態前端設計
-- [ ] 取消報名（學生自行退選課程）功能
-- [ ] 老師／學生的編輯、刪除 API
-- [ ] 部署設定（正式環境資料庫、靜態檔案處理）
+- [x] 取消報名（學生自行退選課程）功能
+- [x] 老師／學生的編輯、刪除 API
+- [x] 部署設定（正式環境資料庫、靜態檔案處理）
 
 ## 版權聲明
 
